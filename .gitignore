@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+
+# Docker
+*.log
+
+# Data files
+*.csv
+*.parquet
+data/
+volumes/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prefect
+.prefect/
+
+# Spark
+metastore_db/
+spark-warehouse/
+derby.log
