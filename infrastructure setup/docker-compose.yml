@@ -1,0 +1,157 @@
+version: '3.9'
+
+networks:
+  iiot-net:
+    driver: bridge
+
+volumes:
+  redpanda-data:
+  timescaledb-data:
+  azurite-data:
+  prefect-data:
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: redpanda
+    networks: [iiot-net]
+    command:
+      - redpanda start
+      - --overprovisioned
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --node-id 0
+      - --set redpanda.auto_create_topics_enabled=true
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--api-urls", "localhost:9644"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    networks: [iiot-net]
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    networks: [iiot-net]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: iiot
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "admin", "-d", "iiot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  jobmanager:
+    image: flink-py:1.18
+    networks: [iiot-net]
+    hostname: jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    volumes:
+      - ./flink-jobs:/opt/flink/jobs
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "localhost:8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  taskmanager:
+    image: flink-py:1.18
+    networks: [iiot-net]
+    command: taskmanager
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    volumes:
+      - ./flink-jobs:/opt/flink/jobs
+
+  spark-master:
+    image: apache/spark:3.5.3-python3
+    networks: [iiot-net]
+    container_name: spark-master
+    hostname: spark-master
+    command: bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_PORT: 8080
+    ports:
+      - "8082:8080"
+      - "7077:7077"
+    volumes:
+      - ./spark-jobs:/opt/spark/jobs
+
+  spark-worker:
+    image: apache/spark:3.5.3-python3
+    networks: [iiot-net]
+    container_name: spark-worker
+    hostname: spark-worker
+    command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_WEBUI_PORT: 8081
+    depends_on:
+      - spark-master
+    volumes:
+      - ./spark-jobs:/opt/spark/jobs
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    networks: [iiot-net]
+    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --loose"
+    ports:
+      - "10000:10000"
+    volumes:
+      - azurite-data:/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10000"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  prefect:
+    image: prefecthq/prefect:2-latest
+    networks: [iiot-net]
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefect-data:/root/.prefect
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
