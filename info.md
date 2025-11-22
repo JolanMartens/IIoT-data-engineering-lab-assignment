@@ -56,9 +56,10 @@ iiot=#
 
 The Debian container with Docker is reachable at `192.168.50.22`. Web UIs are available at the following addresses:
 
+- Portainer: https://192.168.50.22:9443/
+    - admin, pwd: dataengineeringlabo
 - Redpanda console: http://192.168.50.22:8080
 - Spark Master:    http://192.168.50.22:9090
 - Apache Flink:    http://192.168.50.22:8081
 
-(Note: URLs assume the host is reachable from your network and ports are exposed in Docker.)
-
+(Note: URLs assume the host is reachable from your network, via Tailscale, and ports are exposed in Docker.)
