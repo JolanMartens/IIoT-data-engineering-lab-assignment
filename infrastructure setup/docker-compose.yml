@@ -1,157 +1,178 @@
-version: '3.9'
-
 networks:
-  iiot-net:
+  iiot-network:
     driver: bridge
-
-volumes:
-  redpanda-data:
-  timescaledb-data:
-  azurite-data:
-  prefect-data:
 
 services:
   redpanda:
-    image: redpandadata/redpanda:latest
+    image: docker.redpanda.com/redpandadata/redpanda:latest
     container_name: redpanda
-    networks: [iiot-net]
     command:
       - redpanda start
-      - --overprovisioned
       - --smp 1
-      - --memory 1G
-      - --reserve-memory 0M
+      - --overprovisioned
       - --node-id 0
-      - --set redpanda.auto_create_topics_enabled=true
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:9093
+      - --advertise-kafka-addr PLAINTEXT://redpanda:9092,OUTSIDE://localhost:9093
     ports:
       - "9092:9092"
+      - "9093:9093"
       - "9644:9644"
     volumes:
       - redpanda-data:/var/lib/redpanda/data
+    networks:
+      - iiot-network
     healthcheck:
-      test: ["CMD", "rpk", "cluster", "health", "--api-urls", "localhost:9644"]
+      test: ["CMD-SHELL", "rpk cluster health | grep -E '^(Healthy:\\s*true|STATUS:\\s*Healthy)$$' || exit 1"]
       interval: 15s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
+      timeout: 5s
+      retries: 5
 
   redpanda-console:
     image: docker.redpanda.com/redpandadata/console:latest
-    networks: [iiot-net]
+    container_name: redpanda-console
     ports:
       - "8080:8080"
     environment:
-      KAFKA_BROKERS: redpanda:9092
+      # Configure Console using environment variables instead of a file
+      - KAFKA_BROKERS=redpanda:9092
+      - REDPANDA_ADMINAPI_ENABLED=true
+      - REDPANDA_ADMINAPI_URLS=http://redpanda:9644
+    networks:
+      - iiot-network
     depends_on:
       redpanda:
         condition: service_healthy
 
+
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
-    networks: [iiot-net]
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb
     ports:
       - "5432:5432"
     environment:
+      POSTGRES_DB: iiot
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin
-      POSTGRES_DB: iiot
     volumes:
-      - timescaledb-data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - timescaledb-data:/var/lib/postgresql/data
+    networks:
+      - iiot-network
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "admin", "-d", "iiot"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d iiot"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   jobmanager:
-    image: flink-py:1.18
-    networks: [iiot-net]
-    hostname: jobmanager
-    command: jobmanager
+    image: apache/flink:1.15.2-scala_2.12-java11
+    container_name: jobmanager
     ports:
       - "8081:8081"
+    command: jobmanager
     environment:
-      FLINK_PROPERTIES: |
+      - |
+        FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
-        taskmanager.numberOfTaskSlots: 4
     volumes:
-      - ./flink-jobs:/opt/flink/jobs
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "localhost:8081"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - ./flink-jobs:/opt/flink/usrlib
+    networks:
+      - iiot-network
 
   taskmanager:
-    image: flink-py:1.18
-    networks: [iiot-net]
+    image: apache/flink:1.15.2-scala_2.12-java11
+    container_name: taskmanager
     command: taskmanager
     depends_on:
-      jobmanager:
-        condition: service_healthy
+      - jobmanager
     environment:
-      FLINK_PROPERTIES: |
+      - |
+        FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
-        taskmanager.numberOfTaskSlots: 4
-    volumes:
-      - ./flink-jobs:/opt/flink/jobs
+        taskmanager.numberOfTaskSlots: 2
+    networks:
+      - iiot-network
+
 
   spark-master:
-    image: apache/spark:3.5.3-python3
-    networks: [iiot-net]
+    image: apache/spark:3.4.2
     container_name: spark-master
     hostname: spark-master
-    command: bin/spark-class org.apache.spark.deploy.master.Master
-    environment:
-      SPARK_MASTER_HOST: spark-master
-      SPARK_MASTER_PORT: 7077
-      SPARK_MASTER_WEBUI_PORT: 8080
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     ports:
-      - "8082:8080"
+      - "9090:8080"
       - "7077:7077"
     volumes:
-      - ./spark-jobs:/opt/spark/jobs
+      - ./spark-jobs:/opt/spark/work-dir
+    networks:
+      - iiot-network
 
   spark-worker:
-    image: apache/spark:3.5.3-python3
-    networks: [iiot-net]
+    image: apache/spark:3.4.2
     container_name: spark-worker
-    hostname: spark-worker
-    command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
-    environment:
-      SPARK_WORKER_CORES: 2
-      SPARK_WORKER_MEMORY: 2g
-      SPARK_WORKER_WEBUI_PORT: 8081
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
       - spark-master
+    environment:
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
     volumes:
-      - ./spark-jobs:/opt/spark/jobs
+      - ./spark-jobs:/opt/spark/work-dir
+    networks:
+      - iiot-network
 
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
-    networks: [iiot-net]
-    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --loose"
+    container_name: azurite
     ports:
       - "10000:10000"
+      - "10001:10001"
     volumes:
       - azurite-data:/data
+    networks:
+      - iiot-network
+
+  prefect-db:
+    image: postgres:15.2-alpine
+    container_name: prefect-db
+    environment:
+      - POSTGRES_USER=prefect
+      - POSTGRES_PASSWORD=prefect
+      - POSTGRES_DB=prefect
+    volumes:
+      - prefect-db-data:/var/lib/postgresql/data
+    networks:
+      - iiot-network
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "10000"]
+      test: ["CMD-SHELL", "pg_isready -U prefect -d prefect"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 5
 
-  prefect:
+  prefect-server:
     image: prefecthq/prefect:2-latest
-    networks: [iiot-net]
-    command: prefect server start --host 0.0.0.0
+    container_name: prefect-server
     ports:
       - "4200:4200"
-    volumes:
-      - prefect-data:/root/.prefect
+    environment:
+      # Connect to the new postgres database
+      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@prefect-db:5432/prefect
+      - PREFECT_UI_API_URL=http://prefect-server:4200/api
+      - PREFECT_SERVER_API_HOST=0.0.0.0
+    command: prefect server start
+    depends_on:
+      prefect-db:
+        condition: service_healthy
+    networks:
+      - iiot-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:4200/api/health"]
       interval: 15s
       timeout: 5s
-      retries: 10
+      retries: 5
+
+volumes:
+  redpanda-data:
+  timescaledb-data:
+  azurite-data:
+  prefect-db-data:

@@ -1,41 +1,44 @@
 -- Enable TimescaleDB extension
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
--- Raw sensor readings
+-- 1. Create machine_sensors table
+-- Stores raw sensor data from the simulated machines
 CREATE TABLE IF NOT EXISTS machine_sensors (
-    ts          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    machine_id  TEXT NOT NULL,
-    machine_type TEXT,
-    location    TEXT,
-    sensor_type TEXT NOT NULL,
-    value       DOUBLE PRECISION,
-    unit        TEXT
+    timestamp       TIMESTAMPTZ NOT NULL,
+    machine_id      TEXT NOT NULL,
+    machine_type    TEXT,
+    sensor_type     TEXT NOT NULL,
+    value           DOUBLE PRECISION,
+    location        TEXT
 );
 
-SELECT create_hypertable('machine_sensors', 'ts');
-ALTER TABLE machine_sensors SET (
-  timescaledb.compress,
-  timescaledb.compress_segmentby = 'machine_id,sensor_type'
-);
+-- Convert to hypertable partitioned by timestamp
+SELECT create_hypertable('machine_sensors', 'timestamp', if_not_exists => TRUE);
 
--- Aggregates from Flink
+-- Add indexes for common query patterns (by machine and sensor type)
+CREATE INDEX IF NOT EXISTS idx_machine_sensors_machine_id ON machine_sensors (machine_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_sensors_type ON machine_sensors (sensor_type, timestamp DESC);
+
+-- 2. Create sensor_aggregates table
+-- Stores 1-minute windowed aggregations computed by Flink
 CREATE TABLE IF NOT EXISTS sensor_aggregates (
-    window_start TIMESTAMPTZ NOT NULL,
-    window_end   TIMESTAMPTZ NOT NULL,
-    machine_id   TEXT NOT NULL,
-    sensor_type  TEXT NOT NULL,
-    avg_val      DOUBLE PRECISION,
-    min_val      DOUBLE PRECISION,
-    max_val      DOUBLE PRECISION,
-    cnt          BIGINT
+    window_start    TIMESTAMPTZ NOT NULL,
+    window_end      TIMESTAMPTZ NOT NULL,
+    machine_id      TEXT NOT NULL,
+    sensor_type     TEXT NOT NULL,
+    avg_value       DOUBLE PRECISION,
+    min_value       DOUBLE PRECISION,
+    max_value       DOUBLE PRECISION,
+    count_readings  INTEGER
 );
 
-SELECT create_hypertable('sensor_aggregates', 'window_start');
+-- Convert to hypertable (using window_start as the time partitioning column)
+SELECT create_hypertable('sensor_aggregates', 'window_start', if_not_exists => TRUE);
 
--- Indexes
-CREATE INDEX idx_machine_sensors_machine ON machine_sensors (machine_id, ts DESC);
-CREATE INDEX idx_agg_machine ON sensor_aggregates (machine_id, window_start DESC);
+-- Add indexes for analytics
+CREATE INDEX IF NOT EXISTS idx_sensor_aggregates_machine ON sensor_aggregates (machine_id, window_start DESC);
 
--- 90-day retention on both tables
-SELECT add_retention_policy('machine_sensors', INTERVAL '90 days');
-SELECT add_retention_policy('sensor_aggregates', INTERVAL '90 days');
+-- 3. Add Data Retention Policy (90 days)
+-- Automatically drops chunks older than 90 days for both tables
+SELECT add_retention_policy('machine_sensors', INTERVAL '90 days', if_not_exists => TRUE);
+SELECT add_retention_policy('sensor_aggregates', INTERVAL '90 days', if_not_exists => TRUE);
