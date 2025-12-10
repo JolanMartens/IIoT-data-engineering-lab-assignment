@@ -1,9 +1,9 @@
 # Task 1 — Infrastructure setup
 
 
-## Project layout
+## Project Layout
 
-Create the working directory and subfolders:
+Create the working directory and necessary subfolders:
 
 ```bash
 mkdir iiot-lab
@@ -12,9 +12,9 @@ mkdir flink-jobs spark-jobs prefect-flows
 touch init-db.sql docker-compose.yml Dockerfile.flink
 ```
 
-## Build and run
+## Build and Run
 
-Build the Flink Python image and start services with Docker Compose:
+Build the custom Flink Python image and start the services using Docker Compose:
 
 ```bash
 docker build -f Dockerfile.flink -t flink-py:1.18 .
@@ -23,13 +23,13 @@ docker compose up -d --build
 
 ## Verify TimescaleDB
 
-Open a psql shell inside the `timescaledb` service and inspect tables and hypertables:
+Open a `psql` shell inside the `timescaledb` service to inspect the created tables and hypertables:
 
 ```bash
 docker compose exec timescaledb psql -U admin -d iiot
 ```
 
-Output:
+Expected output:
 
 ```text
 psql (14.17)
@@ -51,15 +51,24 @@ iiot=# SELECT * FROM timescaledb_information.hypertables;
 iiot=#
 ```
 
+## Accessing Services
 
-## Accessing services
+The Debian container hosting Docker is reachable at `192.168.50.22`. The Web UIs for the various services are available at the following addresses:
 
-The Debian container with Docker is reachable at `192.168.50.22`. Web UIs are available at the following addresses:
+| Service | URL | Credentials / Notes |
+| :--- | :--- | :--- |
+| **Portainer** | https://192.168.50.22:9443/ | User: `admin`, Pwd: `dataengineeringlabo` |
+| **Redpanda Console** | http://192.168.50.22:8080 | |
+| **Spark Master** | http://192.168.50.22:9090 | |
+| **Apache Flink** | http://192.168.50.22:8081 | |
 
-- Portainer: https://192.168.50.22:9443/
-    - admin, pwd: dataengineeringlabo
-- Redpanda console: http://192.168.50.22:8080
-- Spark Master:    http://192.168.50.22:9090
-- Apache Flink:    http://192.168.50.22:8081
+> **Note:** These URLs assume the host is reachable from your network (e.g., via Tailscale) and that the ports are correctly exposed in Docker.
 
-(Note: URLs assume the host is reachable from your network, via Tailscale, and ports are exposed in Docker.)
+# Task 2 — Data Ingestion Service
+
+Create an `ingestion/` directory containing the following files:
+
+*   `Dockerfile`: Container definition
+*   `requirements.txt`: Python dependencies
+*   `ingest_data.py`: Main ingestion script
+

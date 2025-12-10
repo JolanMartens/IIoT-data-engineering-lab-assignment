@@ -65,8 +65,7 @@ services:
       retries: 5
 
   jobmanager:
-    image: apache/flink:1.15.2-scala_2.12-java11
-    container_name: jobmanager
+    build: ./flink-build  # CHANGE THIS: Use build context instead of 'image: flink:...'
     ports:
       - "8081:8081"
     command: jobmanager
@@ -75,21 +74,22 @@ services:
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
     volumes:
-      - ./flink-jobs:/opt/flink/usrlib
+      - ./flink-jobs:/opt/flink/usrlib/jobs  # Mount your python scripts here
     networks:
       - iiot-network
 
   taskmanager:
-    image: apache/flink:1.15.2-scala_2.12-java11
-    container_name: taskmanager
-    command: taskmanager
+    build: ./flink-build  # CHANGE THIS: Use build context
     depends_on:
       - jobmanager
+    command: taskmanager
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 2
+    volumes:
+      - ./flink-jobs:/opt/flink/usrlib/jobs
     networks:
       - iiot-network
 
