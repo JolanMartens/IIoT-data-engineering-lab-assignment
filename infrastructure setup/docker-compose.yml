@@ -170,6 +170,19 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+  
+  ingestion-service:
+    build: 
+      context: ./ingestion
+    container_name: ingestion-service
+    depends_on:
+      - redpanda
+    environment:
+      - REDPANDA_BROKER=redpanda:9092
+      - SEND_INTERVAL_SECONDS=5
+    networks:
+      - iiot-network  # Ensure this matches the network name you created in Task 1
+    restart: always
 
 volumes:
   redpanda-data:
