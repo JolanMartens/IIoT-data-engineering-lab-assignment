@@ -97,6 +97,25 @@ def main():
         GROUP BY window_start, window_end, machine_id, sensor_type
     """)
 
+    # Query C: SLIDING Window (1 Minute window, slides every 30 seconds)
+    # This satisfies the "Sliding" requirement. In Flink SQL, this is called "HOP".
+    # statement_set.add_insert_sql("""
+    #     INSERT INTO sink_sensor_aggregates
+    #     SELECT 
+    #         machine_id, 
+    #         sensor_type,
+    #         window_start, 
+    #         window_end,
+    #         AVG(`value`) as avg_value,
+    #         MIN(`value`) as min_value,
+    #         MAX(`value`) as max_value,
+    #         COUNT(*) as count_readings
+    #     FROM TABLE(
+    #         HOP(TABLE source_sensors, DESCRIPTOR(`event_time`), INTERVAL '30' SECOND, INTERVAL '1' MINUTE)
+    #     )
+    #     GROUP BY window_start, window_end, machine_id, sensor_type
+    # """)
+
     print("Submitting Flink Jobs with Robust Timestamp Parsing...")
     statement_set.execute()
 
